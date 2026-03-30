@@ -6,7 +6,7 @@ The F1TENTH simulator for ROS 2 is a simulation environment designed to test con
 - Simulates sensors such as LiDAR and odometry.
 - Compatible with autonomous navigation algorithms.
 - Supports 1 or 2 vehicles simultaneously.
-- For a Spanish version of this file, click [here](README_es.md)
+- For a Spanish version of this file, click [here](README_es.md).
 
 ## 1. Simulator Installation
 
