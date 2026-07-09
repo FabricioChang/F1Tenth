@@ -2,248 +2,428 @@
 
 ## Autor
 
-**Fabricio Chang**
-
-Materia: Vehículos No Tripulados  
+**Fabricio Chang**  
+Materia: **Vehículos No Tripulados**  
 ESPOL
 
 ---
 
-# Introducción
+## 1. Introducción
 
-Este proyecto consiste en la implementación de un controlador reactivo para un vehículo F1Tenth utilizando ROS 2 Humble y el simulador oficial F1Tenth Gym.
+Este repositorio contiene la implementación de un controlador reactivo para un vehículo autónomo tipo **F1Tenth**, desarrollado en **ROS 2 Humble** y ejecutado sobre el simulador **F1Tenth Gym ROS**.
 
-El controlador fue desarrollado utilizando el algoritmo **Follow the Gap**, el cual permite navegar de forma autónoma utilizando únicamente la información obtenida por un sensor LiDAR, sin utilizar mapas, planificación global, SLAM o algoritmos de localización.
+El controlador utiliza el algoritmo **Follow the Gap**, un enfoque reactivo basado en LiDAR que permite que el vehículo navegue de forma autónoma evitando obstáculos, sin utilizar mapas globales, SLAM, planificación global ni rutas predefinidas.
 
-Como parte del proyecto también se implementó un sistema automático de:
+Además del controlador principal, se implementaron mejoras para evaluar el rendimiento durante la simulación:
 
-- Conteo de vueltas.
+- Conteo automático de vueltas.
 - Cronómetro por vuelta.
 - Registro del mejor tiempo de vuelta.
-- Detención automática luego de completar 10 vueltas.
+- Tiempo total de ejecución.
+- Detención automática al completar 10 vueltas.
+- Control adaptativo de velocidad según la curva y la distancia libre al frente.
 
-El controlador fue probado sobre el circuito **SaoPaulo**, logrando completar múltiples vueltas consecutivas sin colisiones.
+El controlador fue probado en el mapa **SaoPaulo**, logrando recorrer múltiples vueltas consecutivas con navegación autónoma basada únicamente en el sensor LiDAR y la odometría del vehículo.
 
 ---
 
-# Algoritmo Follow the Gap
+## 2. Entorno recomendado
 
-El algoritmo Follow the Gap es un método reactivo ampliamente utilizado para navegación autónoma.
+El proyecto debe ejecutarse en Linux, preferiblemente en una instalación nativa o máquina virtual con Ubuntu compatible con ROS 2 Humble.
 
-Su funcionamiento consiste en identificar el mayor espacio libre disponible frente al vehículo y dirigir el automóvil hacia dicho espacio evitando obstáculos.
+| Componente | Versión recomendada |
+|---|---|
+| Sistema operativo | Ubuntu 22.04 LTS Jammy Jellyfish |
+| ROS 2 | ROS 2 Humble Hawksbill |
+| Lenguaje | Python 3.10 |
+| Build system | colcon |
+| Visualización | RViz2 |
+| Simulador | F1Tenth Gym ROS |
+| Tipo de controlador | Reactivo basado en LiDAR |
 
-El algoritmo implementado sigue el siguiente flujo:
+> Nota: ROS 2 Humble está diseñado para Ubuntu 22.04. Se recomienda no usar Ubuntu 24.04 para este proyecto si se desea evitar problemas de compatibilidad con paquetes de ROS 2 Humble.
 
+---
+
+## 3. Documentación oficial útil
+
+Antes de ejecutar el proyecto, se recomienda revisar las siguientes documentaciones oficiales:
+
+- Instalación oficial de ROS 2 Humble en Ubuntu 22.04:  
+  https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debs.html
+
+- Documentación general de ROS 2 Humble:  
+  https://docs.ros.org/en/humble/index.html
+
+- Tutorial oficial de RViz2 en ROS 2 Humble:  
+  https://docs.ros.org/en/humble/Tutorials/Intermediate/RViz/RViz-Main.html
+
+- Repositorio oficial de F1Tenth Gym ROS:  
+  https://github.com/f1tenth/f1tenth_gym_ros
+
+- Paquete `ackermann_msgs`:  
+  https://index.ros.org/r/ackermann_msgs/
+
+---
+
+## 4. Instalación de dependencias
+
+### 4.1. Actualizar Ubuntu
+
+```bash
+sudo apt update
+sudo apt upgrade -y
 ```
+
+### 4.2. Instalar ROS 2 Humble Desktop
+
+La instalación recomendada es `ros-humble-desktop`, porque incluye herramientas comunes como RViz2 y paquetes básicos de simulación.
+
+```bash
+sudo apt install ros-humble-desktop -y
+```
+
+Si ROS 2 aún no está instalado, seguir primero la guía oficial completa:
+
+```text
+https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debs.html
+```
+
+### 4.3. Configurar el entorno de ROS 2
+
+Ejecutar en cada terminal nueva:
+
+```bash
+source /opt/ros/humble/setup.bash
+```
+
+Para no tener que repetirlo manualmente cada vez:
+
+```bash
+echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
+source ~/.bashrc
+```
+
+### 4.4. Instalar herramientas de compilación
+
+```bash
+sudo apt install python3-colcon-common-extensions python3-pip git -y
+```
+
+### 4.5. Instalar paquetes necesarios para F1Tenth
+
+```bash
+sudo apt install ros-humble-ackermann-msgs ros-humble-nav2-map-server ros-humble-rviz2 -y
+```
+
+Dependiendo de la instalación del simulador, también puede ser necesario instalar dependencias de Python:
+
+```bash
+pip3 install numpy scipy matplotlib gymnasium
+```
+
+---
+
+## 5. Clonación y preparación del workspace
+
+Ubicarse en la carpeta donde se trabajará el proyecto:
+
+```bash
+cd ~
+```
+
+Clonar el repositorio del proyecto o ingresar al repositorio ya existente:
+
+```bash
+cd ~/F1Tenth-Repository
+```
+
+Si se está instalando desde cero, el simulador base puede obtenerse desde el repositorio oficial:
+
+```bash
+git clone https://github.com/f1tenth/f1tenth_gym_ros.git
+```
+
+Luego compilar el workspace:
+
+```bash
+cd ~/F1Tenth-Repository
+colcon build
+source install/setup.bash
+```
+
+Si se modifica el código Python del controlador y el paquete usa instalación con symlink, puede compilarse así:
+
+```bash
+colcon build --symlink-install
+source install/setup.bash
+```
+
+---
+
+## 6. Descripción del enfoque utilizado
+
+### 6.1. ¿Qué es Follow the Gap?
+
+**Follow the Gap** es un algoritmo reactivo de navegación autónoma. Su objetivo es analizar las mediciones del LiDAR, encontrar el espacio libre más amplio frente al vehículo y dirigir el auto hacia una zona segura dentro de ese espacio.
+
+A diferencia de algoritmos de planificación global, Follow the Gap no necesita conocer el mapa completo ni calcular una trayectoria desde el inicio hasta la meta. En cada instante toma una decisión local usando únicamente la información sensorial disponible.
+
+### 6.2. Flujo general del algoritmo
+
+```text
 LaserScan
-
-↓
-
-Filtrado de datos
-
-↓
-
-Suavizado de lecturas
-
-↓
-
+   ↓
+Preprocesamiento de lecturas
+   ↓
+Limitación del rango máximo
+   ↓
+Suavizado del LiDAR
+   ↓
 Detección del obstáculo más cercano
-
-↓
-
-Creación de Bubble de seguridad
-
-↓
-
-Búsqueda del Largest Gap
-
-↓
-
-Selección del mejor punto del Gap
-
-↓
-
+   ↓
+Creación de una burbuja de seguridad
+   ↓
+Búsqueda del largest gap
+   ↓
+Selección del mejor punto dentro del gap
+   ↓
 Cálculo del ángulo de dirección
-
-↓
-
+   ↓
 Control adaptativo de velocidad
-
-↓
-
-Publicación de comandos Ackermann
+   ↓
+Publicación del comando Ackermann en /drive
 ```
-
-Este enfoque permite navegar de forma robusta incluso en curvas cerradas sin necesidad de conocer previamente el mapa.
 
 ---
 
-# Arquitectura del nodo
+## 7. Arquitectura ROS 2 del controlador
 
-El controlador está implementado como un único nodo ROS 2.
+El controlador se implementó como un nodo ROS 2 en Python utilizando `rclpy`.
 
-## Subscribers
+### 7.1. Nodo principal
 
-### /scan
-
-Tipo:
-
+```text
+follow_the_gap
 ```
+
+Este nodo concentra toda la lógica de navegación reactiva, control de velocidad, conteo de vueltas y registro de tiempos.
+
+### 7.2. Subscribers
+
+#### `/scan`
+
+Tipo de mensaje:
+
+```text
 sensor_msgs/msg/LaserScan
 ```
 
-Recibe las mediciones del sensor LiDAR utilizadas para detectar obstáculos.
+Uso dentro del controlador:
 
-### /ego_racecar/odom
+- Obtener distancias del LiDAR.
+- Detectar obstáculos cercanos.
+- Buscar espacios libres.
+- Calcular la dirección de avance.
 
-Tipo:
+#### `/odom` o `/ego_racecar/odom`
 
-```
+Tipo de mensaje:
+
+```text
 nav_msgs/msg/Odometry
 ```
 
-Se utiliza para:
+Uso dentro del controlador:
 
-- obtener la posición del vehículo
-- registrar el punto inicial
-- contar las vueltas
-- calcular el tiempo por vuelta
+- Leer la posición actual del vehículo.
+- Registrar la posición inicial.
+- Detectar el cruce por la zona de salida/meta.
+- Contar vueltas completadas.
+- Calcular tiempos por vuelta.
 
-## Publisher
+> En algunas configuraciones del simulador el tópico de odometría aparece como `/odom`, mientras que en otras puede aparecer como `/ego_racecar/odom`. Se recomienda verificarlo con:
 
-### /drive
-
-Tipo:
-
+```bash
+ros2 topic list
 ```
+
+### 7.3. Publisher
+
+#### `/drive`
+
+Tipo de mensaje:
+
+```text
 ackermann_msgs/msg/AckermannDriveStamped
 ```
 
-Publica:
+Uso dentro del controlador:
 
-- velocidad
-- ángulo de dirección
-
-para controlar el vehículo.
-
----
-
-# Funcionamiento del controlador
-
-## 1. Lectura del LiDAR
-
-Cada vez que llega un mensaje del tópico **/scan**, el controlador obtiene todas las distancias medidas por el sensor.
-
-Las lecturas inválidas son reemplazadas y posteriormente limitadas a un rango máximo de trabajo.
+- Publicar velocidad.
+- Publicar ángulo de dirección.
+- Detener el vehículo al completar las 10 vueltas.
 
 ---
 
-## 2. Suavizado
+## 8. Funcionamiento interno del controlador
 
-Las lecturas del LiDAR presentan pequeñas variaciones entre muestras consecutivas.
+### 8.1. Lectura del LiDAR
 
-Para reducir el ruido se aplica un filtro de promedio móvil utilizando una ventana configurable.
+El controlador recibe constantemente mensajes desde `/scan`. Cada mensaje contiene un arreglo de distancias medidas por el LiDAR.
 
-Esto produce una trayectoria mucho más estable.
-
----
-
-## 3. Bubble de seguridad
-
-Se identifica el obstáculo más cercano.
-
-Alrededor de dicho obstáculo se elimina una región denominada **Bubble**.
-
-Esto evita que el vehículo intente conducir demasiado cerca de los obstáculos.
+Las lecturas inválidas, infinitas o no numéricas se reemplazan por valores seguros. Después, las distancias se limitan a un rango máximo de trabajo para evitar que valores demasiado grandes afecten la selección del gap.
 
 ---
 
-## 4. Largest Gap
+### 8.2. Recorte del campo frontal
 
-Luego de eliminar la Bubble se busca el segmento continuo más grande libre de obstáculos.
+No se analiza todo el LiDAR completo, sino una región frontal del vehículo. Esto permite que el controlador se concentre en las zonas relevantes para avanzar.
 
-Este segmento representa la mejor dirección posible para continuar avanzando.
+El ángulo frontal usado fue aproximadamente:
 
----
-
-## 5. Selección del mejor punto
-
-No siempre es conveniente conducir exactamente hacia el punto más lejano.
-
-Por esta razón el controlador calcula un punto intermedio entre:
-
-- el centro del Largest Gap
-- el punto más lejano dentro del Gap
-
-Esto reduce las oscilaciones y mejora la estabilidad del vehículo.
-
----
-
-## 6. Dirección
-
-Una vez seleccionado el mejor punto del Largest Gap, se calcula el ángulo correspondiente dentro del LiDAR.
-
-Ese ángulo es enviado como comando de dirección Ackermann.
-
-El ángulo además se limita mediante un valor máximo para evitar maniobras demasiado agresivas.
-
----
-
-## 7. Control de velocidad
-
-La velocidad no es constante.
-
-El controlador adapta automáticamente la velocidad considerando:
-
-- el ángulo de dirección
-- la distancia libre frente al vehículo
-
-Cuando el vehículo circula en una recta y existe suficiente espacio libre, la velocidad aumenta.
-
-Cuando detecta curvas o poco espacio disponible, la velocidad disminuye automáticamente para mantener la estabilidad.
-
----
-
-# Conteo automático de vueltas
-
-El proyecto implementa un contador automático de vueltas utilizando la odometría publicada por el simulador.
-
-El procedimiento es el siguiente:
-
-1. Se registra automáticamente la posición inicial del vehículo.
-2. Cuando el vehículo se aleja una distancia mínima del punto inicial, el contador queda armado.
-3. Cuando el vehículo vuelve a ingresar a una pequeña región alrededor del punto de inicio, se registra una nueva vuelta.
-4. El contador vuelve a desarmarse hasta que el vehículo complete otra vuelta.
-
-Este mecanismo evita contar varias veces la misma vuelta cuando el vehículo permanece cerca de la línea de salida.
-
----
-
-# Cronómetro por vuelta
-
-El controlador registra automáticamente:
-
-- Tiempo de la vuelta actual
-- Mejor tiempo registrado
-- Tiempo total de ejecución
-
-La información se muestra en la terminal durante toda la simulación.
-
-Ejemplo:
-
+```text
+100 grados
 ```
+
+Esto mejora la estabilidad porque evita que el vehículo tome decisiones basadas en obstáculos ubicados demasiado atrás o en zonas laterales poco relevantes.
+
+---
+
+### 8.3. Suavizado de lecturas
+
+Para reducir ruido en el LiDAR se aplica un promedio móvil sobre las mediciones.
+
+Parámetro usado:
+
+```text
+smoothing_window = 5
+```
+
+Este suavizado reduce oscilaciones en el volante y genera una trayectoria más estable.
+
+---
+
+### 8.4. Burbuja de seguridad
+
+El controlador identifica el obstáculo más cercano dentro del campo analizado y crea una zona de exclusión alrededor de él.
+
+Esta zona se conoce como **bubble**.
+
+Parámetro usado:
+
+```text
+bubble_radius = 13
+```
+
+Todas las lecturas dentro de esa burbuja se eliminan temporalmente para evitar que el auto intente pasar demasiado cerca de una pared u obstáculo.
+
+---
+
+### 8.5. Búsqueda del largest gap
+
+Después de eliminar la burbuja de seguridad, el algoritmo busca el segmento continuo más grande de lecturas válidas. Ese segmento representa el espacio libre más amplio disponible frente al vehículo.
+
+El largest gap es importante porque evita seleccionar direcciones demasiado estrechas o peligrosas.
+
+---
+
+### 8.6. Selección del mejor punto
+
+El controlador no apunta directamente al punto más lejano de forma agresiva. En su lugar, selecciona un punto balanceado dentro del gap, considerando:
+
+- El centro del gap.
+- El punto con mayor distancia libre.
+- La necesidad de mantener una trayectoria suave.
+
+Esto reduce zigzagueos y mejora la estabilidad en curvas.
+
+---
+
+### 8.7. Cálculo del ángulo de dirección
+
+Una vez seleccionado el mejor punto, se convierte su índice dentro del arreglo LiDAR a un ángulo de dirección.
+
+El ángulo se limita para evitar giros excesivos:
+
+```text
+max_steering = 0.42 rad
+```
+
+Este valor se publica como `steering_angle` dentro del mensaje Ackermann.
+
+---
+
+### 8.8. Control adaptativo de velocidad
+
+La velocidad cambia automáticamente según dos factores principales:
+
+- Qué tan cerrado es el giro.
+- Cuánta distancia libre existe frente al vehículo.
+
+Velocidades usadas:
+
+| Situación | Velocidad aproximada |
+|---|---:|
+| Recta con espacio libre | 8.2 m/s |
+| Curva media | 4.8 m/s |
+| Curva cerrada o poco espacio | 2.4 m/s |
+
+Esto permite avanzar rápido en rectas y reducir la velocidad en curvas para evitar colisiones.
+
+---
+
+## 9. Conteo automático de vueltas
+
+El controlador utiliza la odometría para registrar vueltas automáticamente.
+
+El procedimiento es:
+
+1. Al iniciar, se guarda la posición inicial del vehículo.
+2. El contador permanece desarmado mientras el vehículo está cerca de la salida.
+3. Cuando el vehículo se aleja una distancia suficiente, el contador queda armado.
+4. Cuando el vehículo vuelve a entrar en el radio de la posición inicial, se cuenta una vuelta.
+5. El contador se vuelve a desarmar hasta que el vehículo se aleje nuevamente.
+
+Parámetros usados:
+
+| Parámetro | Valor |
+|---|---:|
+| Distancia para armar contador | 8.0 m |
+| Radio de detección de meta | 1.5 m |
+| Número total de vueltas | 10 |
+
+Este mecanismo evita contar múltiples vueltas falsas si el vehículo permanece cerca de la línea de salida.
+
+---
+
+## 10. Cronómetro y mejor vuelta
+
+El controlador mide automáticamente:
+
+- Tiempo de la vuelta actual.
+- Tiempo de cada vuelta completada.
+- Mejor tiempo registrado.
+- Tiempo total de ejecución.
+
+Ejemplo de salida esperada en terminal:
+
+```text
 Vuelta 1/10 completada
 Tiempo vuelta: 49.39 s
 Mejor vuelta: 49.39 s
 Tiempo total: 49.39 s
 ```
 
+Al completar 10 vueltas, el controlador publica velocidad cero y detiene el vehículo.
+
 ---
 
-# Parámetros utilizados
+## 11. Parámetros principales
 
 | Parámetro | Valor |
-|-----------|------:|
+|---|---:|
+| Rango máximo del LiDAR | 10.0 m |
 | Bubble Radius | 13 |
 | Ventana de suavizado | 5 |
 | Ángulo frontal analizado | 100° |
@@ -251,168 +431,353 @@ Tiempo total: 49.39 s
 | Velocidad máxima | 8.2 m/s |
 | Velocidad media | 4.8 m/s |
 | Velocidad en curvas | 2.4 m/s |
-| Distancia para rearmar contador | 8 m |
+| Distancia para armar contador | 8.0 m |
 | Radio de detección de meta | 1.5 m |
+| Vueltas objetivo | 10 |
 
 ---
 
-# Estructura del código
+## 12. Estructura del código
 
-El nodo está organizado en funciones independientes para facilitar su comprensión.
+El archivo principal del controlador contiene una clase que hereda de `Node` y organiza la lógica en funciones independientes.
 
-## odom_callback()
+### 12.1. `__init__()`
+
+Inicializa el nodo y define:
+
+- Subscribers.
+- Publisher.
+- Parámetros del LiDAR.
+- Parámetros de velocidad.
+- Variables para conteo de vueltas.
+- Variables para cronómetro.
+
+---
+
+### 12.2. `odom_callback()`
 
 Se ejecuta cada vez que llega un mensaje de odometría.
 
 Responsabilidades:
 
-- registrar la posición inicial
-- calcular distancia recorrida
-- detectar nuevas vueltas
-- calcular tiempos
-- detener el vehículo luego de completar 10 vueltas
+- Registrar posición inicial.
+- Calcular distancia respecto al punto de inicio.
+- Armar o desarmar el contador de vueltas.
+- Detectar vueltas completadas.
+- Calcular tiempo de vuelta.
+- Actualizar mejor vuelta.
+- Detener el vehículo al completar 10 vueltas.
 
 ---
 
-## scan_callback()
+### 12.3. `scan_callback()`
 
-Función principal del algoritmo.
+Es la función principal del algoritmo Follow the Gap.
 
 Responsabilidades:
 
-- procesar el LiDAR
-- eliminar ruido
-- generar Bubble
-- encontrar Largest Gap
-- seleccionar el mejor punto
-- calcular velocidad
-- publicar comandos Ackermann
+- Leer datos del LiDAR.
+- Filtrar lecturas inválidas.
+- Recortar el campo frontal.
+- Suavizar mediciones.
+- Crear la burbuja de seguridad.
+- Encontrar el largest gap.
+- Seleccionar el mejor punto.
+- Calcular dirección.
+- Calcular velocidad.
+- Publicar el comando Ackermann.
 
 ---
 
-## smooth_ranges()
+### 12.4. `smooth_ranges()`
 
-Aplica un filtro de promedio móvil sobre las mediciones del LiDAR.
+Aplica un promedio móvil a las mediciones del LiDAR.
 
----
+Objetivo:
 
-## find_max_gap()
-
-Busca el segmento continuo libre de obstáculos más grande.
-
----
-
-## find_best_point()
-
-Calcula el punto objetivo dentro del Largest Gap utilizando una combinación entre el centro del Gap y el punto más lejano.
+- Reducir ruido.
+- Evitar oscilaciones bruscas.
+- Mejorar estabilidad del volante.
 
 ---
 
-## calculate_speed()
+### 12.5. `find_max_gap()`
 
-Determina la velocidad adecuada considerando:
+Busca el segmento continuo más grande de lecturas libres.
 
-- distancia libre al frente
-- ángulo de dirección
+Objetivo:
+
+- Identificar el espacio más seguro para avanzar.
 
 ---
 
-## publish_drive()
+### 12.6. `find_best_point()`
 
-Publica los comandos Ackermann hacia el tópico:
+Selecciona el punto objetivo dentro del largest gap.
 
+Objetivo:
+
+- Balancear distancia libre y suavidad de trayectoria.
+
+---
+
+### 12.7. `calculate_speed()`
+
+Calcula la velocidad según el ángulo de dirección y la distancia libre al frente.
+
+Objetivo:
+
+- Aumentar velocidad en rectas.
+- Reducir velocidad en curvas.
+- Evitar choques en zonas estrechas.
+
+---
+
+### 12.8. `publish_drive()`
+
+Publica el mensaje `AckermannDriveStamped` en `/drive`.
+
+Campos principales:
+
+```text
+msg.drive.speed
+msg.drive.steering_angle
 ```
-/drive
-```
 
 ---
 
-# Compilación
+### 12.9. `stop_car()`
 
-Desde la carpeta principal del workspace:
+Publica un comando con velocidad cero para detener el vehículo.
+
+Se ejecuta al completar las vueltas objetivo.
+
+---
+
+## 13. Compilación del proyecto
+
+Desde la raíz del workspace:
 
 ```bash
 cd ~/F1Tenth-Repository
+colcon build --symlink-install
+source install/setup.bash
+```
 
-colcon build
+Si hay errores por paquetes anteriores, se puede limpiar la compilación:
 
+```bash
+rm -rf build install log
+colcon build --symlink-install
 source install/setup.bash
 ```
 
 ---
 
-# Ejecución
+## 14. Ejecución del proyecto
 
-## Terminal 1
+Se recomienda usar al menos dos terminales.
 
-Ejecutar el simulador.
+### Terminal 1: ejecutar el simulador
 
 ```bash
+cd ~/F1Tenth-Repository
+source /opt/ros/humble/setup.bash
+source install/setup.bash
 ros2 launch f1tenth_gym_ros gym_bridge_launch.py
 ```
 
-## Terminal 2
+Esto abre el simulador y RViz2.
 
-Ejecutar el controlador.
+---
+
+### Terminal 2: ejecutar el controlador
 
 ```bash
+cd ~/F1Tenth-Repository
+source /opt/ros/humble/setup.bash
 source install/setup.bash
-
 ros2 run f1tenth_gym_ros follow_the_gap
 ```
 
 ---
 
-# Resultado esperado
+## 15. Verificación de tópicos
 
-Durante la ejecución el vehículo debe:
+Antes de ejecutar el controlador, se puede verificar que los tópicos necesarios estén activos:
 
-- recorrer el circuito de forma autónoma
-- evitar colisiones
-- completar 10 vueltas
-- mostrar el tiempo de cada vuelta
-- mostrar el mejor tiempo obtenido
-- detenerse automáticamente al finalizar
+```bash
+ros2 topic list
+```
+
+Tópicos esperados:
+
+```text
+/scan
+/odom
+/drive
+```
+
+En algunas configuraciones puede aparecer:
+
+```text
+/ego_racecar/odom
+```
+
+Para inspeccionar el tipo de mensaje:
+
+```bash
+ros2 topic info /scan
+ros2 topic info /drive
+ros2 topic info /odom
+```
+
+Para observar la odometría:
+
+```bash
+ros2 topic echo /odom
+```
+
+Para observar los comandos enviados al vehículo:
+
+```bash
+ros2 topic echo /drive
+```
 
 ---
 
-# Resultados obtenidos
+## 16. Resultado esperado
+
+Durante la simulación, el vehículo debe:
+
+- Iniciar automáticamente al ejecutar el nodo.
+- Leer el LiDAR desde `/scan`.
+- Detectar el espacio libre más amplio.
+- Girar hacia el mejor punto dentro del gap.
+- Ajustar la velocidad según curvas y obstáculos.
+- Completar vueltas en el circuito.
+- Mostrar tiempos por vuelta en la terminal.
+- Registrar la mejor vuelta.
+- Detenerse automáticamente al completar 10 vueltas.
+
+---
+
+## 17. Resultados obtenidos
 
 Mapa utilizado:
 
-```
+```text
 SaoPaulo
 ```
 
 Resultados alcanzados:
 
-- Controlador completamente reactivo basado en LiDAR.
-- Conteo automático de vueltas mediante odometría.
-- Cronómetro por vuelta implementado.
-- Mejor tiempo de vuelta aproximado de **49 segundos**.
-- Finalización automática luego de completar las 10 vueltas.
+- Controlador reactivo implementado con Follow the Gap.
+- Navegación basada únicamente en LiDAR para evitar obstáculos.
+- Uso de odometría para evaluación de vueltas y tiempos.
+- Conteo automático de vueltas completadas.
+- Cronómetro por vuelta funcional.
+- Mejor tiempo aproximado de vuelta: **49 segundos**.
+- Detención automática al completar 10 vueltas.
 
 ---
 
-# Posibles mejoras
+## 18. Problemas comunes y soluciones
 
-Aunque el controlador cumple correctamente con los objetivos planteados, existen varias mejoras que podrían implementarse en el futuro:
+### 18.1. ROS 2 no reconoce los comandos
 
-- Bubble Radius dinámico.
-- Control PID para suavizar la dirección.
-- Control adaptativo de velocidad basado en Time-To-Collision (TTC).
-- Predicción del mejor Gap utilizando información temporal.
-- Integración con algoritmos de planificación como Pure Pursuit o Stanley Controller.
-- Uso de múltiples sensores para mejorar la robustez de la navegación.
+Ejecutar:
+
+```bash
+source /opt/ros/humble/setup.bash
+```
+
+O agregarlo al `.bashrc`:
+
+```bash
+echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
+source ~/.bashrc
+```
 
 ---
 
-# Conclusiones
+### 18.2. No se encuentra el ejecutable `follow_the_gap`
 
-El algoritmo Follow the Gap permitió desarrollar un controlador reactivo capaz de navegar de forma completamente autónoma utilizando únicamente la información del sensor LiDAR.
+Recompilar el workspace:
 
-La incorporación de un control adaptativo de velocidad permitió aumentar el desempeño del vehículo en las rectas manteniendo una conducción estable en las curvas.
+```bash
+cd ~/F1Tenth-Repository
+colcon build --symlink-install
+source install/setup.bash
+```
 
-Además, la implementación del contador automático de vueltas y del cronómetro permitió evaluar objetivamente el rendimiento del controlador durante múltiples recorridos consecutivos.
+También verificar que el ejecutable esté declarado correctamente en el `setup.py` del paquete.
 
-En conjunto, el proyecto demuestra cómo un algoritmo reactivo relativamente sencillo puede resolver de forma eficiente el problema de navegación autónoma en un circuito cerrado, cumpliendo con todos los requerimientos establecidos para la competencia.
+---
+
+### 18.3. El vehículo no se mueve
+
+Verificar que el controlador esté publicando en `/drive`:
+
+```bash
+ros2 topic echo /drive
+```
+
+Verificar que exista el tópico `/scan`:
+
+```bash
+ros2 topic list
+```
+
+---
+
+### 18.4. No cuenta vueltas
+
+Verificar el tópico correcto de odometría:
+
+```bash
+ros2 topic list | grep odom
+```
+
+Si el simulador usa `/ego_racecar/odom`, cambiar el subscriber del código o remapear el tópico.
+
+---
+
+### 18.5. RViz2 no abre correctamente
+
+Verificar instalación:
+
+```bash
+sudo apt install ros-humble-rviz2 -y
+```
+
+Ejecutar RViz2 manualmente:
+
+```bash
+rviz2
+```
+
+---
+
+## 19. Posibles mejoras futuras
+
+- Bubble radius dinámico según la velocidad.
+- Control PID para suavizar el ángulo de dirección.
+- Control basado en Time-To-Collision.
+- Predicción temporal del gap.
+- Suavizado adicional del comando de dirección.
+- Ajuste automático de velocidad según curvatura estimada.
+- Integración con Pure Pursuit o Stanley Controller.
+- Evaluación en más mapas además de SaoPaulo.
+
+---
+
+## 20. Conclusiones
+
+El controlador desarrollado demuestra que un enfoque reactivo como **Follow the Gap** puede resolver de forma efectiva la navegación autónoma de un vehículo F1Tenth en un circuito cerrado.
+
+El uso del LiDAR permite detectar obstáculos y seleccionar una dirección segura en tiempo real, mientras que la odometría permite registrar métricas de desempeño como vueltas completadas y tiempos por vuelta.
+
+La incorporación de velocidad adaptativa fue fundamental para mejorar el rendimiento: el vehículo puede acelerar en rectas y reducir velocidad en curvas, disminuyendo el riesgo de colisión.
+
+Finalmente, el contador automático de vueltas, el cronómetro y la detención al completar 10 vueltas permiten convertir el controlador en una solución completa para pruebas de competencia dentro del simulador F1Tenth Gym ROS.
