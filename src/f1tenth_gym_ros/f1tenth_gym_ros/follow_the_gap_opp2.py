@@ -14,24 +14,21 @@ class FollowTheGap(Node):
     def __init__(self):
         super().__init__('follow_the_gap')
 
-        self.sub_scan = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
-        self.sub_odom = self.create_subscription(Odometry, '/ego_racecar/odom', self.odom_callback, 10)
-        self.pub_drive = self.create_publisher(AckermannDriveStamped, '/drive', 10)
+        self.sub_scan = self.create_subscription(LaserScan, '/opp2_scan', self.scan_callback, 10)
+        self.sub_odom = self.create_subscription(Odometry, '/opp2_racecar/odom', self.odom_callback, 10)
+        self.pub_drive = self.create_publisher(AckermannDriveStamped, '/opp2_drive', 10)
 
         self.max_range = 10.0
-
-        self.bubble_radius = 22
-        self.close_obstacle_threshold = 1.8
-        self.critical_obstacle_threshold = 1.0
-
+        self.bubble_radius = 25
         self.smoothing_window = 5
-        self.front_angle_deg = 145
+
+        self.front_angle_deg = 120
         self.max_steering = 0.42
 
-        self.speed_straight = 5.8
-        self.speed_medium = 3.5
-        self.speed_curve = 1.3
-        self.speed_danger = 0.6
+        self.speed_straight = 1.8
+        self.speed_medium = 1.3
+        self.speed_curve = 0.8
+        self.speed_danger = 0.8
 
         self.finished = False
 
@@ -51,7 +48,7 @@ class FollowTheGap(Node):
         self.last_lap_time = self.start_time
         self.best_lap_time = None
 
-        self.get_logger().info('Follow The Gap iniciado con modo obstáculos dinámicos y estáticos.')
+        self.get_logger().info('Follow The Gap iniciado con modo obstáculos.')
 
     def odom_callback(self, msg):
         self.x = msg.pose.pose.position.x
@@ -121,7 +118,12 @@ class FollowTheGap(Node):
 
         proc_ranges = ranges[start:end].copy()
         proc_ranges = self.smooth_ranges(proc_ranges)
-        proc_ranges = self.apply_safety_bubbles(proc_ranges)
+
+        closest_index = np.argmin(proc_ranges)
+
+        bubble_start = max(0, closest_index - self.bubble_radius)
+        bubble_end = min(len(proc_ranges), closest_index + self.bubble_radius)
+        proc_ranges[bubble_start:bubble_end] = 0.0
 
         gap_start, gap_end = self.find_max_gap(proc_ranges)
 
@@ -138,55 +140,15 @@ class FollowTheGap(Node):
         front_window = ranges[
             max(0, center_index - 20):min(len(ranges), center_index + 20)
         ]
-
-        very_front_window = ranges[
-            max(0, center_index - 10):min(len(ranges), center_index + 10)
-        ]
-
-        wide_front_window = ranges[
-            max(0, center_index - 60):min(len(ranges), center_index + 60)
-        ]
-
         min_front_distance = np.min(front_window)
-        very_front_distance = np.min(very_front_window)
-        avg_wide_front_distance = np.mean(wide_front_window)
 
-        speed = self.calculate_speed(
-            steering_angle,
-            min_front_distance,
-            avg_wide_front_distance,
-            very_front_distance
-        )
+        speed = self.calculate_speed(steering_angle, min_front_distance)
 
         self.publish_drive(speed, steering_angle)
 
     def smooth_ranges(self, ranges):
         kernel = np.ones(self.smoothing_window) / self.smoothing_window
         return np.convolve(ranges, kernel, mode='same')
-
-    def apply_safety_bubbles(self, ranges):
-        protected_ranges = ranges.copy()
-
-        close_indices = np.where(
-            (protected_ranges > 0.0) &
-            (protected_ranges < self.close_obstacle_threshold)
-        )[0]
-
-        for idx in close_indices:
-            distance = protected_ranges[idx]
-
-            if distance < self.critical_obstacle_threshold:
-                radius = self.bubble_radius + 18
-            elif distance < 1.4:
-                radius = self.bubble_radius + 10
-            else:
-                radius = self.bubble_radius
-
-            bubble_start = max(0, idx - radius)
-            bubble_end = min(len(protected_ranges), idx + radius)
-            protected_ranges[bubble_start:bubble_end] = 0.0
-
-        return protected_ranges
 
     def find_max_gap(self, ranges):
         max_start = 0
@@ -235,30 +197,24 @@ class FollowTheGap(Node):
         farthest = safe_start + best_local
         gap_center = (gap_start + gap_end) // 2
 
-        return int(0.70 * gap_center + 0.30 * farthest)
+        return int(0.85 * gap_center + 0.15 * farthest)
 
-    def calculate_speed(self, steering_angle, front_distance, avg_front_distance, very_front_distance):
+    def calculate_speed(self, steering_angle, front_distance):
         abs_steer = abs(steering_angle)
 
-        if very_front_distance < 0.7:
-            return 0.0
+        if front_distance < 1.0:
+            return 0.5
 
-        if very_front_distance < 1.0:
-            return 0.4
-
-        if front_distance < 1.4:
-            return 0.8
-
-        if front_distance < 1.8 and abs_steer > 0.12:
+        if front_distance < 1.6:
             return self.speed_danger
 
-        if abs_steer < 0.08 and avg_front_distance > 5.0:
+        if abs_steer < 0.08 and front_distance > 6.0:
             return self.speed_straight
 
-        if abs_steer < 0.16 and avg_front_distance > 3.5:
-            return 4.0
+        if abs_steer < 0.15 and front_distance > 4.0:
+            return 4.5
 
-        if abs_steer < 0.25:
+        if abs_steer < 0.25 and front_distance > 2.5:
             return self.speed_medium
 
         return self.speed_curve
