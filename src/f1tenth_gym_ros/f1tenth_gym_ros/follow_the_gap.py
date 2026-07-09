@@ -19,22 +19,21 @@ class FollowTheGap(Node):
         self.pub_drive = self.create_publisher(AckermannDriveStamped, '/drive', 10)
 
         self.max_range = 10.0
+        self.smoothing_window = 5
 
-        self.bubble_radius = 22
-        self.close_obstacle_threshold = 1.8
+        self.bubble_radius = 24
+        self.close_obstacle_threshold = 2.0
         self.critical_obstacle_threshold = 1.0
 
-        self.smoothing_window = 5
-        self.front_angle_deg = 145
+        self.front_angle_deg = 140
         self.max_steering = 0.42
 
-        self.speed_straight = 5.8
-        self.speed_medium = 3.5
-        self.speed_curve = 1.3
-        self.speed_danger = 0.6
+        self.speed_straight = 5.0
+        self.speed_medium = 3.0
+        self.speed_curve = 1.1
+        self.speed_danger = 0.45
 
         self.finished = False
-
         self.x = None
         self.y = None
         self.start_x = None
@@ -51,7 +50,9 @@ class FollowTheGap(Node):
         self.last_lap_time = self.start_time
         self.best_lap_time = None
 
-        self.get_logger().info('Follow The Gap iniciado con modo obstáculos dinámicos y estáticos.')
+        self.last_steering = 0.0
+
+        self.get_logger().info('Follow The Gap estable iniciado.')
 
     def odom_callback(self, msg):
         self.x = msg.pose.pose.position.x
@@ -109,7 +110,6 @@ class FollowTheGap(Node):
 
         angle_min = scan_msg.angle_min
         angle_increment = scan_msg.angle_increment
-
         total_points = len(ranges)
         center_index = total_points // 2
 
@@ -135,20 +135,23 @@ class FollowTheGap(Node):
         steering_angle = angle_min + lidar_index * angle_increment
         steering_angle = max(-self.max_steering, min(self.max_steering, steering_angle))
 
-        front_window = ranges[
-            max(0, center_index - 20):min(len(ranges), center_index + 20)
-        ]
+        steering_angle = 0.75 * steering_angle + 0.25 * self.last_steering
+        self.last_steering = steering_angle
 
         very_front_window = ranges[
-            max(0, center_index - 10):min(len(ranges), center_index + 10)
+            max(0, center_index - 12):min(len(ranges), center_index + 12)
+        ]
+
+        front_window = ranges[
+            max(0, center_index - 28):min(len(ranges), center_index + 28)
         ]
 
         wide_front_window = ranges[
-            max(0, center_index - 60):min(len(ranges), center_index + 60)
+            max(0, center_index - 70):min(len(ranges), center_index + 70)
         ]
 
-        min_front_distance = np.min(front_window)
         very_front_distance = np.min(very_front_window)
+        min_front_distance = np.min(front_window)
         avg_wide_front_distance = np.mean(wide_front_window)
 
         speed = self.calculate_speed(
@@ -175,10 +178,14 @@ class FollowTheGap(Node):
         for idx in close_indices:
             distance = protected_ranges[idx]
 
-            if distance < self.critical_obstacle_threshold:
-                radius = self.bubble_radius + 18
+            if distance < 0.8:
+                radius = 46
+            elif distance < self.critical_obstacle_threshold:
+                radius = 40
             elif distance < 1.4:
-                radius = self.bubble_radius + 10
+                radius = 34
+            elif distance < 1.8:
+                radius = 28
             else:
                 radius = self.bubble_radius
 
@@ -217,7 +224,7 @@ class FollowTheGap(Node):
         if gap_length <= 0:
             return gap_start
 
-        safety_margin = min(10, gap_length // 4)
+        safety_margin = min(14, gap_length // 4)
 
         safe_start = gap_start + safety_margin
         safe_end = gap_end - safety_margin
@@ -226,37 +233,38 @@ class FollowTheGap(Node):
             safe_start = gap_start
             safe_end = gap_end
 
+        gap_center = (safe_start + safe_end) // 2
+
         gap = ranges[safe_start:safe_end]
 
         if len(gap) == 0:
-            return (gap_start + gap_end) // 2
+            return gap_center
 
         best_local = np.argmax(gap)
         farthest = safe_start + best_local
-        gap_center = (gap_start + gap_end) // 2
 
-        return int(0.70 * gap_center + 0.30 * farthest)
+        return int(0.82 * gap_center + 0.18 * farthest)
 
     def calculate_speed(self, steering_angle, front_distance, avg_front_distance, very_front_distance):
         abs_steer = abs(steering_angle)
 
-        if very_front_distance < 0.7:
+        if very_front_distance < 0.75:
             return 0.0
 
-        if very_front_distance < 1.0:
-            return 0.4
+        if very_front_distance < 1.05:
+            return 0.35
 
         if front_distance < 1.4:
-            return 0.8
+            return 0.7
 
-        if front_distance < 1.8 and abs_steer > 0.12:
+        if front_distance < 1.8:
             return self.speed_danger
 
-        if abs_steer < 0.08 and avg_front_distance > 5.0:
+        if abs_steer < 0.07 and avg_front_distance > 5.5:
             return self.speed_straight
 
-        if abs_steer < 0.16 and avg_front_distance > 3.5:
-            return 4.0
+        if abs_steer < 0.15 and avg_front_distance > 3.8:
+            return 3.6
 
         if abs_steer < 0.25:
             return self.speed_medium
